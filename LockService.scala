@@ -26,12 +26,12 @@ class LockServer (storeServers: Seq[ActorRef]) extends Actor {
   val cellstore = new KVClient(storeServers)
 
   def receive() = {
-    case Acquire(lockId, nodeId) =>
+    case Acquire(lockId: String, nodeId: BigInt) =>
       acquire(lockId,myNodeID)
   }
 
-  def acquire(lockId: String, myNodeID: int) {
-
+  def acquire(lockId: String, myNodeID: BigInt) {
+    println(s"Acquire called by $myNodeID")
   }
 }
 object LockServer {

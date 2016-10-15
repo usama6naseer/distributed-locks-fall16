@@ -22,28 +22,39 @@ import scala.collection.mutable.HashSet
 
 // class GroupCell(var groupId: BigInt, var groupMemberIds: HashSet[BigInt])
 
-class Client (val myNodeID: Int) extends Actor {
+class Client (val myNodeID: BigInt) extends Actor {
   val generator = new scala.util.Random
+  var lock_server: Option[ActorRef] = None
 
   def receive() = {
+    // case Update(e) =>
+    //   update(e)
     case Command() =>
-      command
+      command()
+    case View(e) =>
+      lock_server = e
+      println(s"lock_server assigned")
   }
+
+  // private def update(e: ActorRef) = {
+    // lock_server = e
+  // }
 
   private def command() = {
     val sample = generator.nextInt(100)
-    if (sample <= 100) {
-      lock_server ! Acquire("MASTER",myNodeID)
-    } else if (sample > 40 & sample < 60 ) {
-      lock_server ! Acquire("READ",myNodeID)
-    } else {
-      lock_server ! Acquire("WRITE",myNodeID)
-    }
+    println(s"command called")
+    // if (sample <= 100) {
+    //   lock_server ! Acquire("MASTER",myNodeID)
+    // } else if (sample > 40 & sample < 60 ) {
+    //   lock_server ! Acquire("READ",myNodeID)
+    // } else {
+    //   lock_server ! Acquire("WRITE",myNodeID)
+    // }
   }
 }
 
 object Client {
-  def props(myNodeID: Int): Props = {
+  def props(myNodeID: BigInt): Props = {
     Props(classOf[Client], myNodeID)
   }
 }
