@@ -19,6 +19,9 @@ case class Multicast(senderNodeID: BigInt, groupId: BigInt, msg: String) extends
 
 // GroupServers send the following command to Actors
 case class Message(senderNodeID: BigInt, message: String) extends GroupServiceAPI
+case class InformClientMasterSame(masterID: BigInt) extends GroupServiceAPI
+case class InformClientMasterChange(masterID: BigInt) extends GroupServiceAPI
+case class InformClientMasterRelease(masterID: BigInt) extends GroupServiceAPI
 
 class GroupCell(var groupId: BigInt, var groupMemberIds: HashSet[BigInt])
 
@@ -47,6 +50,13 @@ class GroupServer (val myNodeID: Int, val numNodes: Int, storeServers: Seq[Actor
       lockServer = Some(e)
       // endpoints = Some(e)
       // println(s"endpoints: $endpoints")
+    case InformClientMasterSame(masterID) =>
+      informClientSame(masterID)
+    case InformClientMasterChange(masterID) =>
+      informClientChange(masterID)
+    case InformClientMasterRelease(masterID) =>
+      informClientRelease(masterID)
+
     case JoinGroup(id, groupId) =>
       addActorToGroup(id, groupId)
     case LeaveGroup(id, groupId) =>
@@ -60,19 +70,39 @@ class GroupServer (val myNodeID: Int, val numNodes: Int, storeServers: Seq[Actor
   private def allocCell() = {
     // No need to initialize anything.
   }
+  private def informClientSame(id: BigInt) = {
+    if (id == myNodeID) {
+      println(s"You are already the new master. ID is $id")
+    }
+    else {
+      println(s"There is already another master. Master ID is $id. Your ID is $myNodeID")
+    }
+  }  
+  private def informClientChange(id: BigInt) = {
+    println(s"You are the new master. ID is $id")
+  }  
+  private def informClientRelease(id: BigInt) = {
+    if (id == -1) {
+      println(s"Cannot release a lock you dont have. ID is $myNodeID")
+    }
+    else {
+      println(s"Your master lock is released. ID is $id")
+    }
+  }  
 
-  
   private def command() = {
     val sample = generator.nextInt(100)
-    println(s"2 acquire")
-    lockServer.get ! Acquire("MASTER", myNodeID)
-    // if (sample <= 100) {
-    //   joinRandomGroup
-    // } else if (sample > 40 & sample < 60 ) {
-    //   leaveRandomGroup
-    // } else {
-    //   messageRandomGroup
-    // }
+    // println(s"2 acquire")
+    // lockServer.get ! Acquire("MASTER", myNodeID)
+    if (sample <= 50) {
+      lockServer.get ! Acquire("MASTER", myNodeID)
+    } 
+    else if (sample > 50 & sample < 100 ) {
+      lockServer.get ! Release("MASTER", myNodeID)
+    } 
+    else {
+      messageRandomGroup
+    }
   }
 
   // Actor code

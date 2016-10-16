@@ -27,7 +27,7 @@ object KVAppService {
     val servers = for (i <- 0 to numNodes-1)
       yield system.actorOf(GroupServer.props(i, numNodes, stores, ackEach), "GroupServer" + i)
 
-    val lock_server = system.actorOf(LockServer.props(stores), "LockServer")
+    val lock_server = system.actorOf(LockServer.props(stores,servers), "LockServer")
     /** If you want to initialize a different service instead, that previous line might look like this:
       * yield system.actorOf(GroupServer.props(i, numNodes, stores, ackEach), "GroupServer" + i)
       * For that you need to implement the GroupServer object and the companion actor class.

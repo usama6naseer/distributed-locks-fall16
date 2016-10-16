@@ -10,8 +10,8 @@ import akka.util.Timeout
 
 object TestHarness {
   val numNodes = 10
-  val burstSize = 100
-  val opsPerNode = 100
+  val burstSize = 10
+  val opsPerNode = 10
   val system = ActorSystem("Rings")
   implicit val timeout = Timeout(60 seconds)
 
