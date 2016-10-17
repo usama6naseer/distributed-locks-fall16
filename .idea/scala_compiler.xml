@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ScalaCompilerConfiguration">
-    <profile name="SBT 1" modules="compsci512-fall16-cds33-un6" />
+    <profile name="SBT 1" modules="compsci512-fall16-cds33-un6,compsci512-fall16-un6-cds33-lab2" />
   </component>
 </project>
