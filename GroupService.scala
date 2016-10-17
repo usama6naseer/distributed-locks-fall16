@@ -1,5 +1,7 @@
 package rings
 
+import akka.event.Logging
+
 import akka._
 import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.pattern.ask
@@ -29,6 +31,7 @@ class GroupServer (val myNodeID: Int, val numNodes: Int, storeServers: Seq[Actor
   val generator = new scala.util.Random
   val cellstore = new KVClient(storeServers)
   val numGroups: Int = 20
+  implicit val timeout = Timeout(60 seconds)
 
   var stats = new Stats
   var endpoints: Option[Seq[ActorRef]] = None
@@ -95,10 +98,14 @@ class GroupServer (val myNodeID: Int, val numNodes: Int, storeServers: Seq[Actor
     // println(s"2 acquire")
     // lockServer.get ! Acquire("MASTER", myNodeID)
     if (sample <= 50) {
-      lockServer.get ! Acquire("MASTER", myNodeID)
+      // lockServer.get ! Acquire("MASTER", myNodeID)
+      val future = ask(lockServer.get, Acquire("MASTER", myNodeID)).mapTo[String]
+      val done = Await.result(future, 60 seconds)
     } 
     else if (sample > 50 & sample < 100 ) {
-      lockServer.get ! Release("MASTER", myNodeID)
+      // lockServer.get ! Release("MASTER", myNodeID)
+      val future = ask(lockServer.get, Release("MASTER", myNodeID)).mapTo[String]
+      val done = Await.result(future, 60 seconds)
     } 
     else {
       messageRandomGroup

@@ -32,8 +32,10 @@ class LockServer (storeServers: Seq[ActorRef], clientServers: Seq[ActorRef]) ext
       command
     case Acquire(a: String, b: BigInt) =>
       acquire(a,b)
+      sender ! "acquire done"
     case Release(a: String, b: BigInt) =>
       release(a,b)
+      sender ! "release done"
   }
   def command() = {
     println(s"3 command")
@@ -45,12 +47,21 @@ class LockServer (storeServers: Seq[ActorRef], clientServers: Seq[ActorRef]) ext
   def checkMaster(id: BigInt): Unit = master_lock.synchronized  {
     val cell = directRead(findHash("MASTER"))
     if (cell.isEmpty) {
-      makeMaster(id)
+      // makeMaster(id)
+      var lcc = new LockCell("MASTER", id) // hardcoded for master since this function is only called for master selection 
+      directWrite(findHash("MASTER"), lcc)
+      // inform client of the master
+      clientServers(id.toInt) ! InformClientMasterChange(id)
     } else {
       var lc = cell.get
       var master_id = lc.lockHolders
       if (master_id == -1) {
-        makeMaster(id)
+        // makeMaster(id)
+        var lcc = new LockCell("MASTER", id) // hardcoded for master since this function is only called for master selection 
+        directWrite(findHash("MASTER"), lcc)
+        // inform client of the master
+        clientServers(id.toInt) ! InformClientMasterChange(id)
+
       }
       else {
         // println(s"******* $master_id is already master")
@@ -59,13 +70,13 @@ class LockServer (storeServers: Seq[ActorRef], clientServers: Seq[ActorRef]) ext
       }
     }
   }
-  def makeMaster(id: BigInt): Unit = master_lock.synchronized {
-    var lc = new LockCell("MASTER", id) // hardcoded for master since this function is only called for master selection 
-    directWrite(findHash("MASTER"), lc)
-    // println(s"******* $id is master")
-    // inform client of the master
-    clientServers(id.toInt) ! InformClientMasterChange(id)
-  }
+  // def makeMaster(id: BigInt): Unit = master_lock.synchronized {
+  //   var lc = new LockCell("MASTER", id) // hardcoded for master since this function is only called for master selection 
+  //   directWrite(findHash("MASTER"), lc)
+  //   // println(s"******* $id is master")
+  //   // inform client of the master
+  //   clientServers(id.toInt) ! InformClientMasterChange(id)
+  // }
   def release(lockId: String, myNodeID: BigInt): Unit = master_lock.synchronized {
     // three cases for locks i-2 master, read write
     if (lockId == "MASTER") {
