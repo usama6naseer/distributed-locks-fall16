@@ -24,11 +24,10 @@ case class LockGranted(lock: Lock) extends LockResponseAPI
 // Required classes
 class LockCell(var lock: Lock, var clientId: BigInt, var scheduledTimeout: Cancellable)
 
-class LockServer (system: ActorSystem, storeServers: Seq[ActorRef], t: Int) extends Actor {
+class LockServer (system: ActorSystem, t: Int) extends Actor {
   import system.dispatcher
 
   val generator = new scala.util.Random
-//  val cellstore = new KVClient(storeServers)
   var lockMap = new mutable.HashMap[String, LockCell]()
   var clientServers: Seq[ActorRef] = null
   implicit val timeout = Timeout(t seconds)
@@ -43,11 +42,11 @@ class LockServer (system: ActorSystem, storeServers: Seq[ActorRef], t: Int) exte
     case View(clients: Seq[ActorRef]) =>
       clientServers = clients
     case Acquire(lock: Lock, id: BigInt) =>
-      acquire(sender, lock, id)
+      if(!clientFailure()) acquire(sender, lock, id)
     case Release(lock: Lock, id: BigInt) =>
-      release(lock, id)
+      if(!clientFailure()) release(lock, id)
     case KeepAlive(lock: Lock, id: BigInt) =>
-      keepAlive(lock, id)
+      if(!clientFailure()) keepAlive(lock, id)
   }
 
   def acquire(client: ActorRef, lock: Lock, clientId: BigInt) = {
@@ -110,13 +109,11 @@ class LockServer (system: ActorSystem, storeServers: Seq[ActorRef], t: Int) exte
   }
 
   private def clientFailure(): Boolean = {
-    return false
-//    val sample = generator.nextInt(100)
-//    sample <= 15
+    val sample = generator.nextInt(100)
+    sample <= 15
   }
 
   def directRead(key: String): Option[LockCell] = {
-//    val result = cellstore.directRead(findHash(key))
     val result = lockMap.get(key)
     if (result.isEmpty) None
     else
@@ -124,24 +121,15 @@ class LockServer (system: ActorSystem, storeServers: Seq[ActorRef], t: Int) exte
   }
 
   def directWrite(key: String, value: LockCell): Option[LockCell] = {
-//    val result = cellstore.directWrite(findHash(key), value)
     val result = lockMap.put(key, value)
     if (result.isEmpty) None
     else
       Some(result.get.asInstanceOf[LockCell])
   }
-
-  // to convert lock name string to bigint hash
-  import java.security.MessageDigest
-  private def findHash(lc: String): BigInt = {
-    val md: MessageDigest = MessageDigest.getInstance("MD5")
-    val digest: Array[Byte] = md.digest(lc.getBytes)
-    BigInt(1, digest)
-  }
 }
 
 object LockServer {
-  def props(system: ActorSystem, storeServers: Seq[ActorRef], t: Int): Props = {
-    Props(classOf[LockServer], system, storeServers, t)
+  def props(system: ActorSystem, t: Int): Props = {
+    Props(classOf[LockServer], system, t)
   }
 }

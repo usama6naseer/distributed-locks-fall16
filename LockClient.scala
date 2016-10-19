@@ -30,19 +30,20 @@ class LockClient(lockServer: ActorRef, t: Int) {
     * @param symbolicName name of lock
     * @return Lock object representing the lock
     */
-  def acquire(symbolicName: String, id: BigInt): Lock = {
+  def acquire(symbolicName: String, clientId: BigInt): Lock = {
     var lock: Lock = null
     if(lockCache.contains(symbolicName)) {
       lock = lockCache.get(symbolicName).get
-      lockServer ! KeepAlive(lock, id)
+      lockServer ! KeepAlive(lock, clientId)
     } else {
       lock = new Lock(symbolicName)
       try {
-        val future = ask(lockServer, Acquire(lock, id)).mapTo[LockResponseAPI]
+        val future = ask(lockServer, Acquire(lock, clientId)).mapTo[LockResponseAPI]
         Await.result(future, timeout.duration)
       } catch {
         case te: TimeoutException =>
-          acquire(symbolicName, id)
+          println(s"Client: $clientId timed out, retrying acquire")
+          acquire(symbolicName, clientId)
       }
       lockCache.put(symbolicName, lock)
     }
@@ -55,14 +56,14 @@ class LockClient(lockServer: ActorRef, t: Int) {
     * @param lock Lock object to be released
     */
 
-  def release(lock: Lock, id: BigInt, hard: Boolean): Unit = {    // Notify the lock server that it is releasing said lock
-    release(lockServer, lock, id, hard)
+  def release(lock: Lock, clientId: BigInt, hard: Boolean): Unit = {    // Notify the lock server that it is releasing said lock
+    release(lockServer, lock, clientId, hard)
   }
 
-  def release(server: ActorRef, lock: Lock, id: BigInt, hard: Boolean): Unit = {    // Notify the lock server that it is releasing said lock
+  def release(server: ActorRef, lock: Lock, clientId: BigInt, hard: Boolean): Unit = {    // Notify the lock server that it is releasing said lock
     if(lockCache.contains(lock.symbolicName) && hard) {
       lockCache.remove(lock.symbolicName)
     }
-    server ! Release(lock, id)
+    server ! Release(lock, clientId)
   }
 }

@@ -19,12 +19,8 @@ object KVAppService {
 
   def apply(system: ActorSystem, numNodes: Int, ackEach: Int, t: Int): ActorRef = {
 
-    /** Storage tier: create K/V store servers */
-    val stores = for (i <- 0 until numNodes)
-      yield system.actorOf(KVStore.props(), "RingStore" + i)
-
     /** Lock tier: create lock clients and lock server*/
-    val lock_server = system.actorOf(LockServer.props(system, stores, t), "LockServer")
+    val lock_server = system.actorOf(LockServer.props(system, t), "LockServer")
 
     /** Service tier: create app servers */
     val servers = for (i <- 0 to numNodes-1)

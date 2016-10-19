@@ -25,8 +25,7 @@ class GroupServer (lockServer: ActorRef, timeout: Int, id: BigInt) extends Actor
   var queue = new mutable.Queue[Lock]()
   var myLock: Lock = null
   val lockClient = new LockClient(lockServer, timeout)
-  private var count = 0
-  private val lockArr = Array("Hello","My", "Name", "Is")
+  private val lockArr = Array("Hello","My", "Name", "Is", "Slim", "Shady", "Will", "You", "Please", "Stand", "Up")
 
   def receive() = {
     case Prime() =>
@@ -43,11 +42,10 @@ class GroupServer (lockServer: ActorRef, timeout: Int, id: BigInt) extends Actor
     val name = lock.symbolicName
     println(s"Node: $id, Recall Lock: $name")
     lockClient.release(sender, lock, id, true)
-    myLock = null
   }
 
   private def command(): Unit = {
-    if (myLock == null) {
+    if (queue.isEmpty) {
       println(s"Lock is null, getting a new lock")
       myLock = lockClient.acquire(lockArr(id.toInt), id)
     } else {
