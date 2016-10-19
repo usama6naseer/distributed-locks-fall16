@@ -24,7 +24,7 @@ object KVAppService {
       yield system.actorOf(KVStore.props(), "RingStore" + i)
 
     /** Lock tier: create lock clients and lock server*/
-    val lock_server = system.actorOf(LockServer.props(stores, t), "LockServer")
+    val lock_server = system.actorOf(LockServer.props(system, stores, t), "LockServer")
 
     /** Service tier: create app servers */
     val servers = for (i <- 0 to numNodes-1)

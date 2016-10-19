@@ -25,17 +25,18 @@ class LockClient(lockServer: ActorRef, t: Int) {
   implicit val timeout = Timeout(t seconds)
 
   /**
-    * Acquire acts as an interface for both acquiring and renewing a lock.
+    * Acquire acts as an interface for both acquiring and renewing a lock. Client can send keep alive request
+    * by continuing to acquire the lock.
     * @param symbolicName name of lock
     * @return Lock object representing the lock
     */
   def acquire(symbolicName: String, id: BigInt): Lock = {
+    var lock: Lock = null
     if(lockCache.contains(symbolicName)) {
-      val lock = lockCache.get(symbolicName).get
-      lockServer ! Renew(lock, id)
-      lock
+      lock = lockCache.get(symbolicName).get
+      lockServer ! KeepAlive(lock, id)
     } else {
-      val lock = new Lock(symbolicName)
+      lock = new Lock(symbolicName)
       try {
         val future = ask(lockServer, Acquire(lock, id)).mapTo[LockResponseAPI]
         Await.result(future, timeout.duration)
@@ -44,8 +45,8 @@ class LockClient(lockServer: ActorRef, t: Int) {
           acquire(symbolicName, id)
       }
       lockCache.put(symbolicName, lock)
-      lock
     }
+    lock
   }
 
   /**
@@ -53,15 +54,15 @@ class LockClient(lockServer: ActorRef, t: Int) {
     * it is relinquishing the lock
     * @param lock Lock object to be released
     */
-  def release(lock: Lock, id: BigInt): Unit = {
-    release(lockServer, lock, id)
+
+  def release(lock: Lock, id: BigInt, hard: Boolean): Unit = {    // Notify the lock server that it is releasing said lock
+    release(lockServer, lock, id, hard)
   }
 
-  def release(sender: ActorRef, lock: Lock, id: BigInt): Unit = {
-    // Notify the lock server that it is releasing said lock
-    if(lockCache.contains(lock.symbolicName)) {
+  def release(server: ActorRef, lock: Lock, id: BigInt, hard: Boolean): Unit = {    // Notify the lock server that it is releasing said lock
+    if(lockCache.contains(lock.symbolicName) && hard) {
       lockCache.remove(lock.symbolicName)
     }
-    sender ! Release(lock, id)
+    server ! Release(lock, id)
   }
 }
