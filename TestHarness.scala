@@ -13,10 +13,11 @@ object TestHarness {
   val burstSize = 10
   val opsPerNode = 10
   val system = ActorSystem("Rings")
+  val t = 5
   implicit val timeout = Timeout(60 seconds)
 
   // Service tier: create app servers and a Seq of per-node Stats
-  val master = KVAppService(system, numNodes, burstSize)
+  val master = KVAppService(system, numNodes, burstSize, t)
 
   def main(args: Array[String]): Unit = run()
 

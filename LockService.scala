@@ -11,44 +11,43 @@ import scala.concurrent.Await
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashSet
 
+import java.security.MessageDigest
+
 
 // LockClient sends these messages to LockServer
 sealed trait LockServiceAPI
 case class Acquire(lockId: Lock, senderId: BigInt) extends LockServiceAPI
 case class Release(lockId: Lock, senderId: BigInt) extends LockServiceAPI
 case class Renew(lockId: Lock, senderId: BigInt) extends LockServiceAPI
+case class RecallAck(lockId: Lock) extends LockServiceAPI
 
 // Responses to the LockClient
 sealed trait LockResponseAPI
-case class LockGranted(lock: LockAPI)
+case class LockGranted(lock: Lock)
 
 // Required classes
-class LockCell(var id: BigInt, var lock: Lock)
+class LockCell(var client: ActorRef, var lock: Lock, var clientID: BigInt)
 
-class LockTimeout(lock: Lock, client: ActorRef, timeout: Timeout, lockServer: LockServer) extends Thread {
+// Might have synchronization issues here
+class LockTimeout(lock: Lock, client: ActorRef, t: Int, lockServer: LockServer) extends Thread {
+  implicit val timeout = Timeout(t seconds)
 
-  private var execute = true
+  var execute = true
   override def run() = {
     Thread.sleep(timeout.duration.length)
     if(execute) {
-      val future = ask(clientServers(id.toInt), Recall(lock)).mapTo[LockResponseAPI]
+      val future = ask(client, Recall(lock)).mapTo[RecallAck]
       Await.result(future, timeout.duration)
-      lockServer.directWrite(findHash(lock.symbolicName), new LockCell(null, lock))
+      lockServer.directWrite(lockServer.findHash(lock.symbolicName), null)
     }
   }
-
-  def stopExecute() = {
-    execute = false
-  }
-
 }
 
-class LockServer (storeServers: Seq[ActorRef], timeout: Int) extends Actor {
+class LockServer (storeServers: Seq[ActorRef], t: Int) extends Actor {
+  val generator = new scala.util.Random
   val cellstore = new KVClient(storeServers)
-  var clientServers: Seq[ActorRef] = None
-  implicit val timeout = Timeout(timeout seconds)
-  private val lockTimeoutCache = new mutable.HashMap[String, Lock]()
-  private val Int threshold = 90
+  val lockTimeoutCache = new mutable.HashMap[String, LockTimeout]()
+  implicit val timeout = Timeout(t seconds)
 
   /**
     * View: Primes the LockServer with a view of all the clients
@@ -57,66 +56,58 @@ class LockServer (storeServers: Seq[ActorRef], timeout: Int) extends Actor {
     * @return
     */
   def receive() = {
-    case View(e) =>
-      clientServers = Some(e).get
     case Acquire(lock: Lock, id: BigInt) =>
-      if(communicateWithClient()) acquire(lock, id)
+      if(!clientFailure()) acquire(sender, lock, id)
     case Release(lock: Lock, id: BigInt) =>
-      if(communicateWithClient()) release(lock, id)
+      if(!clientFailure()) release(sender, lock, id)
     case Renew(lock: Lock, id: BigInt) =>
-      if(communicateWithClient()) renew(lock, id)
+      if(!clientFailure()) renew(sender, lock)
   }
 
-  def acquire(lock: Lock, id: BigInt) = {
-
-    val cell = directRead()
-    if (cell.isEmpty) {
-      directWrite(findHash(), new LockCell(id, lock))
-    } else {
+  def acquire(client: ActorRef, lock: Lock, id: BigInt) = {
+    val cell = directRead(findHash(lock.symbolicName))
+    if (!cell.isEmpty) {
       val lc = cell.get
-      if(lc.id == null) {
-        directWrite(findHash(lock.symbolicName), new LockCell(id, lock))
-      } else if(lc.id != id) {
-        val future = ask(clientServers(id.toInt), Recall(lock)).mapTo[LockResponseAPI]
-        val result = Await.result(future, timeout.duration)
-        directWrite(findHash(lock.symbolicName), new LockCell(id, lock))
+      if(lc != null && lc.clientID != id) {
+        val future = ask(lc.client, Recall(lock)).mapTo[LockResponseAPI]
+        Await.result(future, timeout.duration) // Waits the time duration, then overwrites the lock
       }
     }
-    renew(lock, id)
-    clientServers(id.toInt) ! LockGranted(lock)
+    directWrite(findHash(lock.symbolicName), new LockCell(client, lock, id)) // Sequence for writing the new lock
+    renew(client, lock) // Start the new lease
+    client ! LockGranted(lock) // let the client know that the lock has been granted
   }
 
-  def release(lock: Lock, id: BigInt) = {
+  def release(client: ActorRef, lock: Lock, id: BigInt) = {
     val cell = directRead(findHash(lock.symbolicName))
     if (!cell.isEmpty) {
       var lc = cell.get
-      if(lc.id != null && lc.id == id) {
-        directWrite(findHash(lock.symbolicName), new LockCell(null, lock))
-        removeTimeout(lock, id)
+      if(lc != null && lc.clientID == id) {
+        directWrite(findHash(lock.symbolicName), null)
+        removeTimeout(lock)
       }
     }
   }
 
-  def renew(lock: Lock, id: BigInt) = {
-    val lt = new LockTimeout(lock, id, timeout, this)
+  private def renew(client: ActorRef, lock: Lock): Unit = {
+    val lt = new LockTimeout(lock, client, t, this)
     lt.start()
     lockTimeoutCache.put(lock.symbolicName, lt)
   }
 
-  private def removeTimeout(lock: Lock) = {
+  private def removeTimeout(lock: Lock): Unit = {
     if(lockTimeoutCache.contains(lock.symbolicName)) {
-      lockTimeoutCache.get(lock.symbolicName).stopExecute()
+      lockTimeoutCache.get(lock.symbolicName).get.execute = false // Is this neccessary? Did I spell neccessary correct?
       lockTimeoutCache.remove(lock.symbolicName)
     }
   }
 
-  private def communicateWithClient(): equals(obj: scala.Any): Boolean = {
+  private def clientFailure(): Boolean = {
     val sample = generator.nextInt(100)
-    sample <= threshold
+    sample <= 90
   }
 
   // to convert lock name string to bigint hash
-  import java.security.MessageDigest
   def findHash(lc: String): BigInt = {
     val md: MessageDigest = MessageDigest.getInstance("MD5")
     val digest: Array[Byte] = md.digest(lc.getBytes)
@@ -124,13 +115,13 @@ class LockServer (storeServers: Seq[ActorRef], timeout: Int) extends Actor {
   }
 
   // Code to access KVClient
-  private def directRead(key: BigInt): Option[LockCell] = {
+  def directRead(key: BigInt): Option[LockCell] = {
     val result = cellstore.directRead(key)
     if (result.isEmpty) None else
       Some(result.get.asInstanceOf[LockCell])
   }
 
-  private def directWrite(key: BigInt, value: LockCell): Option[LockCell] = {
+  def directWrite(key: BigInt, value: LockCell): Option[LockCell] = {
     val result = cellstore.directWrite(key, value)
     if (result.isEmpty) None else
       Some(result.get.asInstanceOf[LockCell])
@@ -189,7 +180,7 @@ class LockServer (storeServers: Seq[ActorRef], timeout: Int) extends Actor {
 
 }
 object LockServer {
-  def props(storeServers: Seq[ActorRef], timeout: Int): Props = {
-    Props(classOf[LockServer], storeServers, clientServers)
+  def props(storeServers: Seq[ActorRef], t: Int): Props = {
+    Props(classOf[LockServer], storeServers, t)
   }
 }

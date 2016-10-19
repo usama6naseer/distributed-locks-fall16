@@ -2,7 +2,7 @@ package rings
 
 import scala.concurrent.duration._
 import scala.concurrent.Await
-import akka.actor.ActorRef
+import akka.actor.{Actor, ActorRef, Props}
 import akka.pattern.ask
 import akka.util.Timeout
 
@@ -10,7 +10,7 @@ import scala.collection.mutable
 
 // LockServer send the following command to LockClient
 sealed trait LockClientAPI
-case class Recall(lock: LockAPI) extends LockClientAPI
+case class Recall(lock: Lock) extends LockClientAPI
 
 // Lock Class
 class Lock(val symbolicName: String)
@@ -20,13 +20,13 @@ class Lock(val symbolicName: String)
   * LockClient implements a client's interface to the LockServer, with a lock cache.
   * Instantiate one LockClient for each actor that is a client of the LockServer.
   */
-class LockClient(lockServer: ActorRef, t: Int, id: BigInt) extends Actor {
+class LockClient(lockServer: ActorRef, t: Int) extends Actor {
   private val lockCache = new mutable.HashMap[String, Lock]()
   implicit val timeout = Timeout(t seconds)
 
   def receive() = {
     case Recall(lock) =>
-      recallLock(lock)
+      recallLock(sender, lock)
   }
 
   /**
@@ -34,13 +34,14 @@ class LockClient(lockServer: ActorRef, t: Int, id: BigInt) extends Actor {
     * @param symbolicName name of lock
     * @return Lock object representing the lock
     */
-  def acquire(symbolicName: String): Lock = {
+  def acquire(symbolicName: String, id: BigInt): Lock = {
     if(lockCache.contains(symbolicName)) {
+      val lock = lockCache.get(symbolicName).get
       lockServer ! Renew(lock, id)
-      lockCache.get(symbolicName).get
+      lock
     } else {
       val lock = new Lock(symbolicName)
-      val future = ask(lockServer, Acquire(lock, myNodeID)).mapTo[LockResponseAPI]
+      val future = ask(lockServer, Acquire(lock, id)).mapTo[LockResponseAPI]
       Await.result(future, timeout.duration)
       lockCache.put(symbolicName, lock)
       lock
@@ -52,7 +53,7 @@ class LockClient(lockServer: ActorRef, t: Int, id: BigInt) extends Actor {
     * it is relinquishing the lock
     * @param lock Lock object to be released
     */
-  def release(lock: Lock) = {
+  def release(lock: Lock, id: BigInt): Unit = {
     // Notify the lock server that it is releasing said lock
     if(lockCache.contains(lock.symbolicName)) {
       lockCache.remove(lock.symbolicName)
@@ -60,7 +61,7 @@ class LockClient(lockServer: ActorRef, t: Int, id: BigInt) extends Actor {
     lockServer ! Release(lock, id)
   }
 
-  private def recallLock(lock) = {
-    release(lock, id)
+  private def recallLock(server: ActorRef, lock: Lock): Unit = {
+    server ! RecallAck(lock)
   }
 }
