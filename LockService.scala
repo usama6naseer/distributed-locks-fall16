@@ -7,11 +7,10 @@ import akka.util.Timeout
 
 import scala.collection.mutable
 import scala.concurrent.duration._
-import scala.concurrent.Await
+import scala.concurrent.{Await, Future, TimeoutException}
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashSet
 
-import java.security.MessageDigest
 
 
 // LockClient sends these messages to LockServer
@@ -23,30 +22,70 @@ case class RecallAck(lockId: Lock) extends LockServiceAPI
 
 // Responses to the LockClient
 sealed trait LockResponseAPI
-case class LockGranted(lock: Lock)
+case class LockGranted(lock: Lock) extends LockResponseAPI
 
 // Required classes
-class LockCell(var client: ActorRef, var lock: Lock, var clientID: BigInt)
+class LockCell(var lock: Lock, var clientID: BigInt)
 
 // Might have synchronization issues here
-class LockTimeout(lock: Lock, client: ActorRef, t: Int, lockServer: LockServer) extends Thread {
+class LockTimeout(val lock: Lock, val clientId: BigInt, clientServers: Seq[ActorRef], t: Int, cellstore: KVInterface) extends Thread {
   implicit val timeout = Timeout(t seconds)
 
-  var execute = true
+  private var execute = true
   override def run() = {
-    Thread.sleep(timeout.duration.length)
+    stallExecution()
     if(execute) {
-      val future = ask(client, Recall(lock)).mapTo[RecallAck]
-      Await.result(future, timeout.duration)
-      lockServer.directWrite(lockServer.findHash(lock.symbolicName), null)
+      try {
+        val future = ask(clientServers(clientId.toInt), Recall(lock)).mapTo[Release]
+        Await.result(future, timeout.duration)
+        cellstore.directWrite(lock.symbolicName, null)
+      } catch {
+        case te: TimeoutException =>
+          cellstore.directWrite(lock.symbolicName, null)
+      }
     }
+  }
+
+  def stopExecuting() = {
+    this.execute = false
+  }
+
+  def stallExecution() = {
+    Thread.sleep(timeout.duration.length * 1000)
+  }
+}
+
+class KVInterface(cellstore: KVClient) {
+
+  // Code to access KVClient
+  def directRead(key: String): Option[LockCell] = {
+    val result = cellstore.directRead(findHash(key))
+    if (result.isEmpty) None
+    else
+      Some(result.get.asInstanceOf[LockCell])
+  }
+
+  def directWrite(key: String, value: LockCell): Option[LockCell] = {
+    val result = cellstore.directWrite(findHash(key), value)
+    if (result.isEmpty) None
+    else
+      Some(result.get.asInstanceOf[LockCell])
+  }
+
+  // to convert lock name string to bigint hash
+  import java.security.MessageDigest
+  private def findHash(lc: String): BigInt = {
+    val md: MessageDigest = MessageDigest.getInstance("MD5")
+    val digest: Array[Byte] = md.digest(lc.getBytes)
+    BigInt(1, digest)
   }
 }
 
 class LockServer (storeServers: Seq[ActorRef], t: Int) extends Actor {
   val generator = new scala.util.Random
-  val cellstore = new KVClient(storeServers)
+  val cellstore = new KVInterface(new KVClient(storeServers))
   val lockTimeoutCache = new mutable.HashMap[String, LockTimeout]()
+  var clientServers: Seq[ActorRef] = null
   implicit val timeout = Timeout(t seconds)
 
   /**
@@ -56,75 +95,77 @@ class LockServer (storeServers: Seq[ActorRef], t: Int) extends Actor {
     * @return
     */
   def receive() = {
+    case View(clients: Seq[ActorRef]) =>
+      clientServers = clients
     case Acquire(lock: Lock, id: BigInt) =>
-      if(!clientFailure()) acquire(sender, lock, id)
+      acquire(sender, lock, id)
     case Release(lock: Lock, id: BigInt) =>
-      if(!clientFailure()) release(sender, lock, id)
+      release(lock, id)
     case Renew(lock: Lock, id: BigInt) =>
-      if(!clientFailure()) renew(sender, lock)
+      renew(lock, id)
   }
 
   def acquire(client: ActorRef, lock: Lock, id: BigInt) = {
-    val cell = directRead(findHash(lock.symbolicName))
+    val name = lock.symbolicName
+    println(s"Acquire request from: $id for lock: $name")
+    val cell = cellstore.directRead(lock.symbolicName)
     if (!cell.isEmpty) {
       val lc = cell.get
-      if(lc != null && lc.clientID != id) {
-        val future = ask(lc.client, Recall(lock)).mapTo[LockResponseAPI]
-        Await.result(future, timeout.duration) // Waits the time duration, then overwrites the lock
+      if(lc != null) {
+        removeTimeout(lock, lc.clientID) // Remove the timeout because the locks about to get a new one
+        if(lc.clientID != id) {
+          val future = ask(clientServers(lc.clientID.toInt), Recall(lock)).mapTo[Release]
+          Await.result(future, timeout.duration)
+        }
       }
     }
-    directWrite(findHash(lock.symbolicName), new LockCell(client, lock, id)) // Sequence for writing the new lock
-    renew(client, lock) // Start the new lease
-    client ! LockGranted(lock) // let the client know that the lock has been granted
+    cellstore.directWrite(lock.symbolicName, new LockCell(lock, id)) // Sequence for writing the new lock
+    client ! LockGranted(lock)
+    addTimeout(lock, id)
   }
 
-  def release(client: ActorRef, lock: Lock, id: BigInt) = {
-    val cell = directRead(findHash(lock.symbolicName))
+  def release(lock: Lock, id: BigInt) = {
+    val name = lock.symbolicName
+    println(s"Release request from: $id for lock: $name")
+    val cell = cellstore.directRead(lock.symbolicName)
     if (!cell.isEmpty) {
       var lc = cell.get
       if(lc != null && lc.clientID == id) {
-        directWrite(findHash(lock.symbolicName), null)
-        removeTimeout(lock)
+        cellstore.directWrite(lock.symbolicName, null)
+        removeTimeout(lock, id)
       }
     }
   }
 
-  private def renew(client: ActorRef, lock: Lock): Unit = {
-    val lt = new LockTimeout(lock, client, t, this)
-    lt.start()
-    lockTimeoutCache.put(lock.symbolicName, lt)
-  }
-
-  private def removeTimeout(lock: Lock): Unit = {
+  private def renew(lock: Lock, id: BigInt): Unit = {
     if(lockTimeoutCache.contains(lock.symbolicName)) {
-      lockTimeoutCache.get(lock.symbolicName).get.execute = false // Is this neccessary? Did I spell neccessary correct?
-      lockTimeoutCache.remove(lock.symbolicName)
+      var lt = lockTimeoutCache.get(lock.symbolicName).get
+      if(lt.clientId == id) {
+        lt.stallExecution()
+      }
     }
   }
 
+  private def removeTimeout(lock: Lock, id: BigInt): Unit = {
+    if(lockTimeoutCache.contains(lock.symbolicName)) {
+      var lt = lockTimeoutCache.get(lock.symbolicName).get
+      if(lt.clientId == id) {
+        lockTimeoutCache.get(lock.symbolicName).get.stopExecuting // Is this neccessary? Did I spell neccessary correct?
+        lockTimeoutCache.remove(lock.symbolicName)
+      }
+    }
+  }
+
+  private def addTimeout(lock: Lock, id: BigInt): Unit = {
+    val lt = new LockTimeout(lock: Lock, id, clientServers, t, cellstore)
+    lockTimeoutCache.put(lock.symbolicName, lt)
+    lt.start()
+  }
+
   private def clientFailure(): Boolean = {
-    val sample = generator.nextInt(100)
-    sample <= 90
-  }
-
-  // to convert lock name string to bigint hash
-  def findHash(lc: String): BigInt = {
-    val md: MessageDigest = MessageDigest.getInstance("MD5")
-    val digest: Array[Byte] = md.digest(lc.getBytes)
-    BigInt(1, digest)
-  }
-
-  // Code to access KVClient
-  def directRead(key: BigInt): Option[LockCell] = {
-    val result = cellstore.directRead(key)
-    if (result.isEmpty) None else
-      Some(result.get.asInstanceOf[LockCell])
-  }
-
-  def directWrite(key: BigInt, value: LockCell): Option[LockCell] = {
-    val result = cellstore.directWrite(key, value)
-    if (result.isEmpty) None else
-      Some(result.get.asInstanceOf[LockCell])
+    return false
+//    val sample = generator.nextInt(100)
+//    sample <= 15
   }
 
 //  def checkMaster(lock: LockAPI, id: BigInt): Unit = master_lock.synchronized  {

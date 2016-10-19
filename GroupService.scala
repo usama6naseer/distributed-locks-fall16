@@ -30,7 +30,10 @@ class GroupCell(var groupId: BigInt, var groupMemberIds: HashSet[BigInt])
 class GroupServer (lockServer: ActorRef, timeout: Int, id: BigInt) extends Actor {
   val generator = new scala.util.Random
   var queue = new mutable.Queue[Lock]()
+  var myLock: Lock = null
   val lockClient = new LockClient(lockServer, timeout)
+  private var count = 0
+  private val lockArr = Array("Hello","My", "Name", "Is")
 
 //  val cellstore = new KVClient(storeServers)
 //
@@ -52,6 +55,8 @@ class GroupServer (lockServer: ActorRef, timeout: Int, id: BigInt) extends Actor
       allocCell
     case Command() =>
       command
+    case Recall(lock) =>
+      recall(sender, lock)
 //    case View(e) =>
 //      lockServer = Some(e)
       // endpoints = Some(e)
@@ -74,6 +79,36 @@ class GroupServer (lockServer: ActorRef, timeout: Int, id: BigInt) extends Actor
   }
 
   private def allocCell() = {}
+  private def recall(sender: ActorRef, lock: Lock): Unit = {
+    // finish executing, then release the lock
+    val name = lock.symbolicName
+    println(s"Node: $id, Recall Lock: $name")
+    lockClient.release(sender, lock, id)
+  }
+
+  private def command(): Unit = {
+    if (count == 0) {
+      println(s"Getting the first lock")
+      myLock = lockClient.acquire(lockArr(id.toInt), id)
+      count = count + 1
+    } else {
+      val sample = generator.nextInt(100)
+      if (sample < 80) {
+        println(s"Renewing lock")
+        myLock = lockClient.acquire(myLock.symbolicName, id)
+      }
+      else {
+        println(s"Releasing lock")
+        lockClient.release(myLock, id)
+        println(s"Acquiring new lock")
+        myLock = lockClient.acquire(getRandomString(), id)
+      }
+    }
+  }
+
+  private def getRandomString(): String = {
+    lockArr(generator.nextInt(lockArr.length))
+  }
 //  private def informClientSame(id: BigInt) = {
 //    if (id == myNodeID) {
 //      println(s"You are already the new master. ID is $id")
@@ -93,21 +128,6 @@ class GroupServer (lockServer: ActorRef, timeout: Int, id: BigInt) extends Actor
 //      println(s"Your master lock is released. ID is $id")
 //    }
 //  }
-
-  private def command(): Unit = {
-    val sample = generator.nextInt(100)
-    if (sample <= 50) {
-      queue += lockClient.acquire(getRandomString(), id)
-    }
-    else {
-      lockClient.release(queue.dequeue(), id)
-    }
-  }
-
-  private def getRandomString(): String = {
-    val ret = generator.nextString(2)
-    ret
-  }
 
   // Actor code
   /**
