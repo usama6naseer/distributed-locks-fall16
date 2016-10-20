@@ -32,7 +32,7 @@ class GroupServer (lockServer: ActorRef, timeout: Int, id: BigInt, burstSize: In
       incoming(sender)
       command
     case Recall(lock) =>
-      recall(sender, lock)
+      recall(sender, lock) // Recall the lock when receiving this request (it will otherwise be timed out)
   }
 
   private def incoming(master: ActorRef) = {
@@ -48,9 +48,9 @@ class GroupServer (lockServer: ActorRef, timeout: Int, id: BigInt, burstSize: In
     if(lockList.contains(name)) {
       lockClient.release(sender, lock, id)
       lockList -= name
-//      println(s"Node: $id, Recall Lock: $name, current Locks: $lockList")
+      println(s"Node: $id, Recall Lock: $name, current Locks: $lockList")
     } else {
-//      println(s"Node: $id, Already Removed Lock: $name, current Locks: $lockList")
+      println(s"Node: $id, Already Removed Lock: $name, current Locks: $lockList")
     }
   }
 

@@ -54,12 +54,19 @@ class LockClient(lockServer: ActorRef, t: Int) {
     * Removes the Lock from the cache if it exists there; sends notification to the lock server that
     * it is relinquishing the lock
     * @param lock Lock object to be released
+    * @param clientId the id of the Client
     */
-
   def release(lock: Lock, clientId: BigInt): Unit = {    // Notify the lock server that it is releasing said lock
     release(lockServer, lock, clientId)
   }
 
+  /**
+    * Allows for the Client to respond to the sender of the Recall message.
+    *
+    * @param server the server to send the Release message to
+    * @param lock the lock in question
+    * @param clientId the id of the Client
+    */
   def release(server: ActorRef, lock: Lock, clientId: BigInt): Unit = {    // Notify the lock server that it is releasing said lock
     if(lockCache.contains(lock.symbolicName)) {
       lockCache.remove(lock.symbolicName)
