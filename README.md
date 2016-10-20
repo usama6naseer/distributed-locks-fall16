@@ -14,7 +14,12 @@ The LockServer uses the Akka scheduler to keep track of timeouts. Whenever a Loc
 ## ClientService
 Our client service displays an implementation of how to use the LockService. The Client must be an Akka Actor capable of handling a Recall message. Upon receiving the Recall message, the Client must finish executing its code before relinquishing the lock. The Client can reply to the _recall_ through the LockClient's _release_ function that allows for the specification of the sender. 
 
+## Timeouts
+Client's lease with the lock server exists for a specific amount of time i-e timeout. Our system can be tested for various timeout values by changing the variable 't' in TestHarness.scala file. This timeout value is used by lock server to detect lease expiration.
+As expected, decreasing the timeout value resulted in more clients' time-outs (lease expiration). Since our tests (command() function in ClientService.scala) selects between acquire, renew and release in a random manner, there is lower chance for a client to renew its lock lease if the timeout value is smaller. Increasing the timeout decreases the chance of lease expiring due to greater chance of renew being called by command() in ClientService.scala for a particular client.
+
 ## Current Issues
 Our code is not perfect and will run into synchronization and timeout errors. The synchronization error occurs when the Client does not respond to the Recall message soon enough (or at all). This keeps the lock within the Client's cache when it should be removed. A solution is to always release the lock ASAP. Our server does not handle multiple concurrent requests well and can get overloaded if messages are sent in bursts from several clients. 
 
 Our code could additionally be improved by using the KVStore to maintain the locks. In a real-world setting, the locks would have to be maintained using persistent storage. The code could also be improved by granting clients the option to respond to timeout Recall messages with a KeepAlive message. 
+
