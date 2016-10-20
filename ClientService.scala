@@ -22,8 +22,7 @@ class GroupCell(var groupId: BigInt, var groupMemberIds: HashSet[BigInt])
 
 class GroupServer (lockServer: ActorRef, timeout: Int, id: BigInt) extends Actor {
   val generator = new scala.util.Random
-  var queue = new mutable.Queue[Lock]()
-  var myLock: Lock = null
+  var lockList = new mutable.HashSet[String]()
   val lockClient = new LockClient(lockServer, timeout)
   private val lockArr = Array("Hello","My", "Name", "Is", "Slim", "Shady", "Will", "You", "Please", "Stand", "Up")
 
@@ -40,27 +39,38 @@ class GroupServer (lockServer: ActorRef, timeout: Int, id: BigInt) extends Actor
 
   private def recall(sender:ActorRef, lock: Lock): Unit = {
     val name = lock.symbolicName
-    println(s"Node: $id, Recall Lock: $name")
-    lockClient.release(sender, lock, id, true)
+    if(lockList.contains(name)) {
+      lockClient.release(sender, lock, id, true)
+      lockList -= name
+      println(s"Node: $id, Recall Lock: $name, current Locks: $lockList")
+    } else {
+      println(s"Node: $id, Already Removed Lock: $name, current Locks: $lockList")
+    }
   }
 
   private def command(): Unit = {
-    if (queue.isEmpty) {
-      println(s"Lock is null, getting a new lock")
-      myLock = lockClient.acquire(lockArr(id.toInt), id)
+    if (lockList.isEmpty) {
+      val name = lockArr(id.toInt)
+      println(s"Node: $id, Acquiring: $name")
+      lockClient.acquire(lockArr(id.toInt), id)
+      lockList += name
     } else {
       val sample = generator.nextInt(100)
-      if (sample < 80) {
-        println(s"Renewing lock")
-        myLock = lockClient.acquire(myLock.symbolicName, id)
+      if (sample < 70) {
+        val name = lockList.toVector(generator.nextInt(lockList.size))
+        lockClient.acquire(name, id)
+        println(s"Node: $id, Renewing Lock: $name, current Locks: $lockList")
       }
-      else {
-        var name = myLock.symbolicName
-        println(s"Releasing lock $name")
-        lockClient.release(myLock, id, false)
-        myLock = lockClient.acquire(getRandomString(), id)
-        name = myLock.symbolicName
-        println(s"Acquired new lock $name")
+      else if (sample >= 70 && sample < 80) {
+        val name = lockList.toVector(generator.nextInt(lockList.size))
+        lockClient.release(new Lock(name), id, false)
+        lockList -= name
+        println(s"Node: $id, Releasing Lock: $name, current Locks: $lockList")
+      } else {
+        val name = getRandomString()
+        println(s"Node: $id, Releasing Lock: $name, current Locks: $lockList")
+        lockClient.acquire(name, id)
+        lockList += name
       }
     }
   }
