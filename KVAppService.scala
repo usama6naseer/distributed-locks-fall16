@@ -20,13 +20,13 @@ object KVAppService {
   def apply(system: ActorSystem, numNodes: Int, ackEach: Int, t: Int): ActorRef = {
 
     /** Lock tier: create lock clients and lock server*/
-    val lock_server = system.actorOf(LockServer.props(system, t), "LockServer")
+    val lockServer = system.actorOf(LockServer.props(system, t), "LockServer")
 
     /** Service tier: create app servers */
     val servers = for (i <- 0 to numNodes-1)
-      yield system.actorOf(GroupServer.props(lock_server, t, i), "GroupServer" + i)
+      yield system.actorOf(GroupServer.props(lockServer, t, i, ackEach), "GroupServer" + i)
 
-    lock_server ! View(servers)
+    lockServer ! View(servers)
 
     /** If you want to initialize a different service instead, that previous line might look like this:
       * yield system.actorOf(GroupServer.props(i, numNodes, stores, ackEach), "GroupServer" + i)

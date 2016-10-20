@@ -56,12 +56,12 @@ class LockClient(lockServer: ActorRef, t: Int) {
     * @param lock Lock object to be released
     */
 
-  def release(lock: Lock, clientId: BigInt, hard: Boolean): Unit = {    // Notify the lock server that it is releasing said lock
-    release(lockServer, lock, clientId, hard)
+  def release(lock: Lock, clientId: BigInt): Unit = {    // Notify the lock server that it is releasing said lock
+    release(lockServer, lock, clientId)
   }
 
-  def release(server: ActorRef, lock: Lock, clientId: BigInt, hard: Boolean): Unit = {    // Notify the lock server that it is releasing said lock
-    if(lockCache.contains(lock.symbolicName) && hard) {
+  def release(server: ActorRef, lock: Lock, clientId: BigInt): Unit = {    // Notify the lock server that it is releasing said lock
+    if(lockCache.contains(lock.symbolicName)) {
       lockCache.remove(lock.symbolicName)
     }
     server ! Release(lock, clientId)

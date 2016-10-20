@@ -51,7 +51,7 @@ class LockServer (system: ActorSystem, t: Int) extends Actor {
 
   def acquire(client: ActorRef, lock: Lock, clientId: BigInt) = {
     val name = lock.symbolicName
-//    println(s"Acquire request from: $clientId for lock: $name")
+    println(s"Acquire request from: $clientId for lock: $name")
     val cell = directRead(lock.symbolicName)
     if (!cell.isEmpty) {
       val lc = cell.get
@@ -68,7 +68,7 @@ class LockServer (system: ActorSystem, t: Int) extends Actor {
 
   def release(lock: Lock, clientId: BigInt) = {
     val name = lock.symbolicName
-//    println(s"Release request from: $clientId for lock: $name")
+    println(s"Release request from: $clientId for lock: $name")
     val cell = directRead(lock.symbolicName)
     if (!cell.isEmpty) {
       val lc = cell.get
@@ -109,8 +109,9 @@ class LockServer (system: ActorSystem, t: Int) extends Actor {
   }
 
   private def clientFailure(): Boolean = {
-    val sample = generator.nextInt(100)
-    sample <= 15
+    false
+//    val sample = generator.nextInt(100)
+//    sample <= 90
   }
 
   def directRead(key: String): Option[LockCell] = {
